@@ -36,7 +36,7 @@ function! s:create_window(lines) abort
   if s:window.bufnr ># 0
     exec 'silent ' . bufwinnr(s:window.bufnr) . 'wincmd w | resize ' . win_height
   else
-    exec 'silent ' . win_height . 'new [gitworktree]'
+    exec 'silent new [gitworktree] | wincmd J | resize ' . win_height
 
     setlocal buftype=nofile
     setlocal filetype=gitworktree
@@ -83,7 +83,9 @@ function! s:load_worktree() abort
     exec ':bd ' . buffer.bufnr
   endfor
 
-  exec ':close | cd ' . worktree.path . ' | e ' . worktree.path
+  let winnr = bufwinnr(s:window.bufnr)
+
+  exec ':cd ' . worktree.path . ' | e ' . worktree.path
 endfunction
 
 
