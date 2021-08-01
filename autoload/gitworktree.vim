@@ -30,32 +30,32 @@ function! s:set_window_closed() abort
 endfunction
 
 
-function! s:create_window(lines) abort
-  let win_height = len(a:lines) + 2
-
-  if s:window.bufnr ># 0
-    exec 'silent ' . bufwinnr(s:window.bufnr) . 'wincmd w | resize ' . win_height
-  else
-    exec 'silent new [gitworktree] | wincmd J | resize ' . win_height
-
-    setlocal buftype=nofile
-    setlocal filetype=gitworktree
-    setlocal bufhidden=wipe
-    setlocal nobuflisted
-    setlocal noswapfile
-  endif
+function! s:jump_to_window(winnr) abort
+  exec 'silent ' . a:winnr . 'wincmd w'
+endfunction
 
 
+function! s:create_window() abort
+  exec 'silent new [gitworktree]'
+
+  setlocal buftype=nofile
+  setlocal filetype=gitworktree
+  setlocal bufhidden=wipe
+  setlocal nobuflisted
+  setlocal noswapfile
+
+  return bufnr('%')
+endfunction
+
+
+function! s:fill_window(lines) abort
   setlocal modifiable
-  silent norm! ggdG
+  silent normal! ggdG
 
   call append(0, a:lines)
 
-  exec '$delete | norm gg'
-
+  silent normal! Gddgg
   setlocal nomodifiable
-
-  return bufnr('%')
 endfunction
 
 
@@ -66,10 +66,9 @@ function! s:load_worktree() abort
   let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> buf.changed ==# 1 })
   let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(buf.name, ':t')})
 
-
   if len(modified_buffers) ># 0
     echohl ErrorMsg
-    echo "Can not change worktree: following files are not saved:"
+    echoerr "Can not change worktree: following files are not saved:"
     echohl None
 
     echo join(modified_buffers_names, '\n')
@@ -77,7 +76,23 @@ function! s:load_worktree() abort
     return
   endif
 
-  let worktree = s:worktrees[line('.') - 1]
+  let current_worktree = {}
+
+  for tree in s:worktrees
+    if tree.path ==# cwd
+      let current_worktree = tree
+    endif
+  endfor
+
+  let new_worktree = s:worktrees[line('.') - 1]
+
+  if current_worktree.path ==# new_worktree.path
+    echohl ErrorMsg
+    echo "Already in " . current_worktree.path
+    echohl None
+
+    return
+  endif
 
   for buffer in buffers_in_current_worktree
     exec ':bd ' . buffer.bufnr
@@ -85,7 +100,7 @@ function! s:load_worktree() abort
 
   let winnr = bufwinnr(s:window.bufnr)
 
-  exec ':cd ' . worktree.path . ' | e ' . worktree.path
+  exec ':cd ' . new_worktree.path . ' | e ' . new_worktree.path
 endfunction
 
 
@@ -102,13 +117,21 @@ function! gitworktree#list()
   endif
 
   let items = map(systemlist('git worktree list'), function('s:create_worktree_dict'))
-
   let s:worktrees = deepcopy(items)
-
   let entries = map(deepcopy(items), {key, val -> val.entry})
+  let win_height = max([len(entries) + 2, 5])
+
+  if s:window.is_open
+    call s:jump_to_window(bufwinnr(s:window.bufnr))
+  else
+    let s:window.bufnr = s:create_window()
+  endif
+
+  exec 'wincmd J | resize ' . win_height
 
   let s:window.is_open = 1
-  let s:window.bufnr = s:create_window(entries)
+
+  call s:fill_window(entries)
 endfunction
 
 
