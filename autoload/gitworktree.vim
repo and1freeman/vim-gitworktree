@@ -3,20 +3,22 @@ let s:window = {
       \ 'is_open': 0,
       \ 'bufnr': -1,
       \ }
+let s:base = ''
 
-function! s:create_worktrees_list() abort "{{{
-  return map(systemlist('git worktree list'), function('s:create_worktree_obj'))
+
+function! s:update_worktrees_list() abort
+  try
+    let worktrees = map(systemlist('git worktree list'), function('s:create_worktree_obj'))
+  catch
+    let worktrees = []
+  endtry
+
+  let s:worktrees = deepcopy(worktrees)
+  return worktrees
 endfunction
-"}}}
 
 
-function! s:update_worktrees_list(list) abort "{{{
-  let s:worktrees = deepcopy(a:list)
-endfunction
-"}}}
-
-
-function! s:create_worktree_obj(_, git_output) abort "{{{
+function! s:create_worktree_obj(_, git_output) abort
   let [path, commit, branch] = filter(split(a:git_output, ' '), {_, value -> !empty(value)})
   let cwd = getcwd()
 
@@ -29,37 +31,37 @@ function! s:create_worktree_obj(_, git_output) abort "{{{
 
   return worktree
 endfunction
-"}}}
 
 
-function! s:show_warning(msg) abort "{{{
+function! s:show_warning(msg) abort
   echohl WarningMsg
-  echo a:msg
+  echo 'vim-gitworktree: ' . a:msg
   echohl None
 endfunction
-"}}}
 
 
-function! s:is_file_inside_path(filename, path) abort "{{{
-  return len(matchstr(fnamemodify(a:filename, ':p'), a:path)) ># 0
+function! s:is_file_inside_path(filename, path) abort
+  if !len(a:filename)
+    return 0
+  endif
+
+  let modified = fnamemodify(a:filename, ':p')
+  return filereadable(modified) && len(matchstr(modified, a:path)) > 0
 endfunction
-"}}}
 
 
-function! s:set_window_closed() abort "{{{
+function! s:set_window_closed() abort
   let s:window.is_open = 0
   let s:window.bufnr = -1
 endfunction
-"}}}
 
 
-function! s:jump_to_window(winnr) abort "{{{
+function! s:jump_to_window(winnr) abort
   exec 'silent ' . a:winnr . 'wincmd w'
 endfunction
-"}}}
 
 
-function! s:create_window() abort "{{{
+function! s:create_window() abort
   exec 'silent new'
 
   setlocal buftype=nofile
@@ -70,10 +72,9 @@ function! s:create_window() abort "{{{
 
   return bufnr('%')
 endfunction
-"}}}
 
 
-function! s:fill_window(winnr, lines) abort "{{{
+function! s:fill_window(winnr, lines) abort
   exec 'silent ' . a:winnr . 'wincmd w'
 
   setlocal modifiable
@@ -84,39 +85,48 @@ function! s:fill_window(winnr, lines) abort "{{{
   silent normal! Gddgg
   setlocal nomodifiable
 endfunction
-"}}}
 
 
-function! s:load_worktree(path) abort "{{{
+function! s:find(predicate, list, ...) abort
+  let item = len(a:000) ? a:000[0] : 0
+
+  for el in a:list
+    if call(a:predicate, [el])
+      let item = el
+      break
+    endif
+  endfor
+
+  return item
+endfunction
+
+
+function! s:load_worktree(path) abort
+  silent call s:update_worktrees_list()
+
   let cwd = getcwd()
 
-  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:is_file_inside_path(buf.name, cwd)})
-  let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> buf.changed == 1 })
-  let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(buf.name, ':t')})
+  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:is_file_inside_path(get(buf, 'name', ''), cwd)})
+  let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> get(buf, 'changed', 0) == 1 })
+  let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':t')})
+
 
   if len(modified_buffers) > 0
-    call s:show_warning("Can not change worktree: following files are not saved:")
+    call s:show_warning("Can not change worktree. Following files are not saved:")
     echo join(modified_buffers_names, '\n')
 
     return
   endif
 
-  let current_worktree = {}
-  let new_worktree = {}
+  let current_worktree = s:find({wtree -> get(wtree, 'is_current', 0)}, s:worktrees, {})
+  let new_worktree = s:find({wtree -> get(wtree, 'path', '') ==# a:path}, s:worktrees, {})
 
-  for tree in s:worktrees
-    if tree['path'] ==# cwd
-      let current_worktree = tree
-    endif
-  endfor
+  if empty(new_worktree)
+    call s:show_warning('Can not find selected path. Try to update worktrees list.')
+    return
+  endif
 
-  for tree in s:worktrees
-    if tree['path'] ==# a:path
-      let new_worktree = tree
-    endif
-  endfor
-
-  if current_worktree.path ==# new_worktree.path
+  if get(current_worktree, 'path', 'NO_CURRENT') ==# get(new_worktree, 'path', 'NO_NEW')
     call s:show_warning("Already in " . current_worktree.path)
     return
   endif
@@ -127,28 +137,25 @@ function! s:load_worktree(path) abort "{{{
 
   let winnr = bufwinnr(s:window.bufnr)
 
-  exec ':cd ' . new_worktree.path . ' | e ' . new_worktree.path
-
-  call s:update_worktrees_list(s:create_worktrees_list())
+  let new_worktree_path = get(new_worktree, 'path')
+  exec ':cd ' . new_worktree_path . ' | e ' . new_worktree_path
 endfunction
-"}}}
 
 
-function! s:is_worktree() abort "{{{
+function! s:is_worktree() abort
   let is_worktree = !empty(trim(system('git rev-parse --is-inside-work-tree 2>/dev/null')))
 
   if !is_worktree
     let cwd = getcwd()
 
-    call s:show_warning("git worktree not found: " . cwd)
+    call s:show_warning('Not a git repository: ' . getcwd())
   endif
 
   return is_worktree
 endfunction
-"}}}
 
 
-function! s:flatten_list(list) abort "{{{
+function! s:flatten_list(list) abort
   let val = []
 
   for elem in a:list
@@ -162,12 +169,23 @@ function! s:flatten_list(list) abort "{{{
 
   return val
 endfunction
-"}}}
 
 
-function! s:Exec() abort "{{{
+
+function! s:Exec() abort
+  silent call s:update_worktrees_list()
+
+  if !len(s:worktrees)
+    call s:show_warning('Not a git repository: ' . getcwd())
+    return
+  endif
+
   let line = getline('.')
   let linenr = line('.')
+
+  if !len(line)
+    return
+  endif
 
   let worktrees_start = search('\[Worktrees\]', 'n')
   let branches_start = search('\[Branches\]', 'n')
@@ -177,7 +195,7 @@ function! s:Exec() abort "{{{
         \ ? 'worktrees'
         \ : 'none'
 
-  if !len(line) || scope ==# 'none'
+  if scope ==# 'none'
     return
   endif
 
@@ -188,29 +206,35 @@ function! s:Exec() abort "{{{
     if len(worktree_path) == 0
       return
     endif
+
     call s:load_worktree(worktree_path)
+
   elseif scope ==# 'branches'
     let branch_name = trim(line, '* ')
     echo branch_name
-
   endif
+
+  silent call s:update_worktrees_list()
 endfunction
-"}}}
 
 
-function! gitworktree#call(...) abort"{{{
+
+function! gitworktree#call(...) abort
   if !s:is_worktree()
     return
   endif
 
-  let worktrees_objs = s:create_worktrees_list()
-  call s:update_worktrees_list(worktrees_objs)
+  silent let worktrees_objs = s:update_worktrees_list()
+
+  echo split(system('git rev-parse --git-dir'), '\n')
   let max_wtree_path_len = max(map(deepcopy(worktrees_objs), {_, wtree -> len(wtree.path)}))
 
   let worktrees = map(deepcopy(worktrees_objs), {_, wtree -> (wtree.is_current ? '* ' : '  ') . wtree.path . repeat(' ', max_wtree_path_len - len(wtree.path)) . '  ->  ' . wtree.branch})
   let branches = map(systemlist('git branch --list'), {_, branch -> (len(matchstr(branch, '*')) ==# 1 ? '* ' : '  ') . trim(branch, '*+ ')})
 
   let content = s:flatten_list([
+        \ 'New worktrees will be created in ' . s:base,
+        \ '',
         \ '[Worktrees]:',
         \  worktrees,
         \  '',
@@ -231,7 +255,6 @@ function! gitworktree#call(...) abort"{{{
 
   exec 'wincmd J'
 endfunction
-"}}}
 
 
 function! gitworktree#complete(lead, line, pos) abort
@@ -252,7 +275,7 @@ endfunction
 augroup detect_gitworktree_filetype
   autocmd!
   autocmd Filetype gitworktree
-        \ nnoremap <buffer> <cr> :call <sid>Exec()<cr>
+        \ nnoremap <silent><buffer> <cr> :call <sid>Exec()<cr>
 
   autocmd Filetype gitworktree
         \ autocmd BufUnload <buffer> call <sid>set_window_closed()
