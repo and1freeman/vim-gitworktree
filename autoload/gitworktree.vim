@@ -3,12 +3,24 @@ let s:window = {
       \ 'is_open': 0,
       \ 'bufnr': -1,
       \ }
-let s:base = ''
+
+let s:base = '../'
 
 
-function! s:update_worktrees_list() abort
+function! s:isWorktree() abort
+  let isWorktree = !empty(trim(system('git rev-parse --is-inside-work-tree 2>/dev/null')))
+
+  if !isWorktree
+    call utils#EchoWarning('Not a git repository: ' . getcwd())
+  endif
+
+  return isWorktree
+endfunction
+
+
+function! s:UpdateWorktreesList() abort
   try
-    let worktrees = map(systemlist('git worktree list'), function('s:create_worktree_obj'))
+    let worktrees = map(systemlist('git worktree list'), function('s:CreateWorktreeObject'))
   catch
     let worktrees = []
   endtry
@@ -18,7 +30,7 @@ function! s:update_worktrees_list() abort
 endfunction
 
 
-function! s:create_worktree_obj(_, git_output) abort
+function! s:CreateWorktreeObject(_, git_output) abort
   let [path, commit, branch] = filter(split(a:git_output, ' '), {_, value -> !empty(value)})
   let cwd = getcwd()
 
@@ -33,14 +45,7 @@ function! s:create_worktree_obj(_, git_output) abort
 endfunction
 
 
-function! s:show_warning(msg) abort
-  echohl WarningMsg
-  echo 'vim-gitworktree: ' . a:msg
-  echohl None
-endfunction
-
-
-function! s:is_file_inside_path(filename, path) abort
+function! s:isFileInsidePath(filename, path) abort
   if !len(a:filename)
     return 0
   endif
@@ -50,18 +55,13 @@ function! s:is_file_inside_path(filename, path) abort
 endfunction
 
 
-function! s:set_window_closed() abort
+function! s:SetWindowClosed() abort
   let s:window.is_open = 0
   let s:window.bufnr = -1
 endfunction
 
 
-function! s:jump_to_window(winnr) abort
-  exec 'silent ' . a:winnr . 'wincmd w'
-endfunction
-
-
-function! s:create_window() abort
+function! s:CreateWindow() abort
   exec 'silent new'
 
   setlocal buftype=nofile
@@ -74,7 +74,7 @@ function! s:create_window() abort
 endfunction
 
 
-function! s:fill_window(winnr, lines) abort
+function! s:FillWindow(winnr, lines) abort
   exec 'silent ' . a:winnr . 'wincmd w'
 
   setlocal modifiable
@@ -87,153 +87,178 @@ function! s:fill_window(winnr, lines) abort
 endfunction
 
 
-function! s:find(predicate, list, ...) abort
-  let item = len(a:000) ? a:000[0] : 0
+function! s:LoadWorktree(path) abort
+  silent call s:UpdateWorktreesList()
 
-  for el in a:list
-    if call(a:predicate, [el])
-      let item = el
-      break
-    endif
-  endfor
-
-  return item
-endfunction
-
-
-function! s:load_worktree(path) abort
-  silent call s:update_worktrees_list()
+  if empty(a:path)
+    return
+  endif
 
   let cwd = getcwd()
 
-  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:is_file_inside_path(get(buf, 'name', ''), cwd)})
+  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:isFileInsidePath(get(buf, 'name', ''), cwd)})
   let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> get(buf, 'changed', 0) == 1 })
-  let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':t')})
+  let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':.')})
 
-
-  if len(modified_buffers) > 0
-    call s:show_warning("Can not change worktree. Following files are not saved:")
+  if len(modified_buffers)
+    call utils#EchoWarning("Can not change worktree. Following files are not saved:")
     echo join(modified_buffers_names, '\n')
 
     return
   endif
 
-  let current_worktree = s:find({wtree -> get(wtree, 'is_current', 0)}, s:worktrees, {})
-  let new_worktree = s:find({wtree -> get(wtree, 'path', '') ==# a:path}, s:worktrees, {})
+  let current_worktree = utils#Find({wtree -> get(wtree, 'is_current', 0)}, s:worktrees, {})
+  let new_worktree = utils#Find({wtree -> get(wtree, 'path', '') ==# a:path}, s:worktrees, {})
 
   if empty(new_worktree)
-    call s:show_warning('Can not find selected path. Try to update worktrees list.')
+    call utils#EchoWarning('Can not find selected worktree. Try to update worktrees list.')
     return
   endif
 
   if get(current_worktree, 'path', 'NO_CURRENT') ==# get(new_worktree, 'path', 'NO_NEW')
-    call s:show_warning("Already in " . current_worktree.path)
+    call utils#EchoWarning('Already in ' . current_worktree.path . '. ' .  '[' . current_worktree.branch . ']')
     return
   endif
 
   for buffer in buffers_in_current_worktree
-    exec ':bd ' . buffer.bufnr
+    exec ':bd ' . get(buffer, 'bufnr', -1)
   endfor
-
-  let winnr = bufwinnr(s:window.bufnr)
 
   let new_worktree_path = get(new_worktree, 'path')
   exec ':cd ' . new_worktree_path . ' | e ' . new_worktree_path
 endfunction
 
+function! s:AddWorktree(branch) abort
+  " TODO
+  let path = '../' . a:branch
+  let current_branch = trim(system('git branch --show-current'), " \n")
 
-function! s:is_worktree() abort
-  let is_worktree = !empty(trim(system('git rev-parse --is-inside-work-tree 2>/dev/null')))
+  if a:branch ==# current_branch
+    call utils#EchoWarning('Already at [' . a:branch . '].')
+    return
+  elseif isdirectory(path)
+    call utils#EchoWarning('Directory ' . path . ' already exists.')
+    return
+  endif
+endfunction
 
-  if !is_worktree
-    let cwd = getcwd()
+function! s:remove_worktree() abort
+  " TODO
+  " check if worktrees have changed since status buffer creation as in s:LoadWorktree
 
-    call s:show_warning('Not a git repository: ' . getcwd())
+  let data = s:GetContext()
+  let wtpath = get(data, 'wtpath')
+
+  if empty(wtpath)
+    call utils#EchoWarning('Not a worktree.')
+    return
   endif
 
-  return is_worktree
-endfunction
-
-
-function! s:flatten_list(list) abort
-  let val = []
-
-  for elem in a:list
-    if type(elem) == type([])
-      call extend(val, s:flatten_list(elem))
-    else
-      call extend(val, [elem])
-    endif
-    unlet elem
-  endfor
-
-  return val
-endfunction
-
-
-
-function! s:Exec() abort
-  silent call s:update_worktrees_list()
-
-  if !len(s:worktrees)
-    call s:show_warning('Not a git repository: ' . getcwd())
+  if !empty(matchstr(wtpath, ' --force '))
     return
+  endif
+
+  try
+    let msg = get(systemlist('git worktree remove ' . shellescape(wtpath)), 0, '')
+  catch
+    echo 'error'
+  endtry
+
+  let is_main = !empty(matchstr(msg, 'is a main working tree'))
+  let is_modified = !empty(matchstr(msg, 'contains modified or untracked'))
+
+  if is_main
+    call utils#EchoWarning("Can not remove worktree. \n" . wtpath . ' is a main worktree.')
+  elseif is_modified
+    call utils#EchoWarning("Can not remove worktree. \n" . wtpath . ' contains modified or untracked files.')
+  else
+    call gitworktree#Call()
+  endif
+endfunction
+
+
+function! s:GetContext() abort
+  silent call s:UpdateWorktreesList()
+
+  let defaults = {
+        \ 'line': '',
+        \ 'context': '',
+        \ 'wtpath': '',
+        \ 'branch': ''
+        \ }
+
+  if empty(s:worktrees)
+    call utils#EchoWarning('Not a git repository: ' . getcwd())
+    return defaults
   endif
 
   let line = getline('.')
   let linenr = line('.')
 
-  if !len(line)
-    return
+  if empty(line)
+    return defaults
   endif
 
   let worktrees_start = search('\[Worktrees\]', 'n')
   let branches_start = search('\[Branches\]', 'n')
-  let scope = linenr > branches_start
+  let context = linenr > branches_start
         \ ? 'branches'
         \ : linenr > worktrees_start && linenr != branches_start
         \ ? 'worktrees'
-        \ : 'none'
+        \ : ''
 
-  if scope ==# 'none'
-    return
+  call extend(defaults, { 'context': context })
+
+  if empty(context)
+    return defaults
+  elseif context ==# 'worktrees'
+    let wtpath = substitute(trim(get(filter(split(line, ' '), {_, str -> match(str, '^/\f\+$') == 0 }), 0, ''), ' '), '[\/]$', '', '')
+    call extend(defaults, { 'wtpath': wtpath })
+  elseif context ==# 'branches'
+    let branch = trim(line, '* ')
+    call extend(defaults, { 'branch': branch })
   endif
 
+  call extend(defaults, { 'line': line })
 
-  if scope ==# 'worktrees'
-    let worktree_path = substitute(trim(get(filter(split(line, ' '), {_, str -> match(str, '^/\f\+$') == 0 }), 0, ''), ' '), '[\/]$', '', '')
-
-    if len(worktree_path) == 0
-      return
-    endif
-
-    call s:load_worktree(worktree_path)
-
-  elseif scope ==# 'branches'
-    let branch_name = trim(line, '* ')
-    echo branch_name
-  endif
-
-  silent call s:update_worktrees_list()
+  return defaults
 endfunction
 
 
+function! s:OnEnter() abort
+  let data = s:GetContext()
 
-function! gitworktree#call(...) abort
-  if !s:is_worktree()
+  let context = get(data, 'context')
+  let wtpath = get(data, 'wtpath')
+  let branch = get(data, 'branch')
+
+  if context ==# 'worktrees'
+    call s:LoadWorktree(wtpath)
+  elseif context ==# 'branches'
+    call s:AddWorktree(branch)
+  endif
+
+  silent call s:UpdateWorktreesList()
+endfunction
+
+
+function! gitworktree#Call(...) abort
+  if !s:isWorktree()
     return
   endif
 
-  silent let worktrees_objs = s:update_worktrees_list()
-
-  echo split(system('git rev-parse --git-dir'), '\n')
+  silent let worktrees_objs = s:UpdateWorktreesList()
   let max_wtree_path_len = max(map(deepcopy(worktrees_objs), {_, wtree -> len(wtree.path)}))
+  let worktrees = map(deepcopy(worktrees_objs), {_, wtree -> (wtree.is_current ? '* ' : '  ')
+        \ . wtree.path
+        \ . repeat(' ', max_wtree_path_len - len(wtree.path)) . '  ->  ' . wtree.branch})
 
-  let worktrees = map(deepcopy(worktrees_objs), {_, wtree -> (wtree.is_current ? '* ' : '  ') . wtree.path . repeat(' ', max_wtree_path_len - len(wtree.path)) . '  ->  ' . wtree.branch})
   let branches = map(systemlist('git branch --list'), {_, branch -> (len(matchstr(branch, '*')) ==# 1 ? '* ' : '  ') . trim(branch, '*+ ')})
 
-  let content = s:flatten_list([
-        \ 'New worktrees will be created in ' . s:base,
+  let cwd = getcwd()
+  let content = utils#FlattenList([
+        \ 'Current working directory: ' . cwd,
+        \ 'New worktrees will be created in ' . fnamemodify(cwd, ':h'),
         \ '',
         \ '[Worktrees]:',
         \  worktrees,
@@ -244,16 +269,13 @@ function! gitworktree#call(...) abort
         \ ])
 
   if !s:window.is_open
-    let s:window.bufnr = s:create_window()
+    let s:window.bufnr = s:CreateWindow()
   endif
 
   let winnr = bufwinnr(s:window.bufnr)
   let s:window.is_open = 1
 
-  call s:jump_to_window(winnr)
-  call s:fill_window(winnr, content)
-
-  exec 'wincmd J'
+  call s:FillWindow(winnr, content)
 endfunction
 
 
@@ -275,8 +297,11 @@ endfunction
 augroup detect_gitworktree_filetype
   autocmd!
   autocmd Filetype gitworktree
-        \ nnoremap <silent><buffer> <cr> :call <sid>Exec()<cr>
+        \ nnoremap <silent><buffer> <cr> :call <sid>OnEnter()<cr>
 
   autocmd Filetype gitworktree
-        \ autocmd BufUnload <buffer> call <sid>set_window_closed()
+        \ nnoremap <silent><buffer> gd :call <sid>remove_worktree()<cr>
+
+  autocmd Filetype gitworktree
+        \ autocmd BufUnload <buffer> call <sid>SetWindowClosed()
 augroup END
