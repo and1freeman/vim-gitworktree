@@ -35,12 +35,23 @@ function! s:SplitAndFilter(string) abort
   return filter(split(a:string, ' '), {_, s -> !empty(s)})
 endfunction
 
+
+function! s:IsBareRepo() abort
+  return trim(system('git rev-parse --is-bare-repository'), " \n") ==# 'true'
+endfunction
+
 function! s:GetWorktrees() abort
   let worktrees = []
 
   for worktree in systemlist('git worktree list')
-    let [path, _, branch] = s:SplitAndFilter(worktree)
-    let branch = trim(branch, '[]')
+    let list = s:SplitAndFilter(worktree)
+
+    if trim(list[1],'()') ==# 'bare'
+      continue
+    endif
+
+    let path = list[0]
+    let branch = trim(list[2], '[]')
 
     call extend(worktrees, [{ 'branch': branch, 'path': path }])
   endfor
@@ -50,7 +61,11 @@ endfunction
 
 
 function! s:GetCurrentBranch() abort
-  return trim(system('git branch --show-current'), " \n")
+  if s:IsBareRepo()
+    return ''
+  else
+    return trim(system('git branch --show-current'), " \n")
+  endif
 endfunction
 
 
@@ -60,17 +75,18 @@ function! s:LoadSubCmd(...) abort
     return
   endif
 
+  let branch = a:1
+
   let cwd = getcwd()
   let worktrees = s:GetWorktrees()
-  let current_branch = s:GetCurrentBranch()
-  let [current_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# current_branch}, worktrees)
+  let [current_worktree, found] = s:Find({wt -> get(wt, 'path', '') ==# cwd}, worktrees)
 
-  if a:1 ==# current_branch
-    call s:EchoWarning('Already in ' . current_worktree.path . ' [' . a:1 . ']')
+  if found && branch ==# current_worktree.branch
+    call s:EchoWarning('Already in ' . current_worktree.path . ' [' . branch . ']')
     return
   endif
 
-  let [new_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# a:1}, worktrees)
+  let [new_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# branch}, worktrees)
 
   if !found
     call s:EchoWarning('Worktree not found: ' . a:1)
@@ -93,7 +109,8 @@ function! s:LoadSubCmd(...) abort
   endfor
 
   let new_worktree_path = get(new_worktree, 'path')
-  exec 'cd ' . new_worktree_path . ' | e ' . new_worktree_path
+  exec 'cd ' . new_worktree_path
+  exec 'Ntree ' . new_worktree_path
   exec 'clearjumps'
 endfunction
 
@@ -169,7 +186,8 @@ function! gitworktree#complete(lead, line, pos) abort
   if len(args) >= 2 && tolower(args[1]) ==# 'load'
     let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
     let current_branch = s:GetCurrentBranch()
-    return filter(branches, {_, b -> b =~# '^' . a:lead && !empty(b) && b !=# current_branch })
+    echom branches current_branch
+    return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
   endif
 
 
