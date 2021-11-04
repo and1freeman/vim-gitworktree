@@ -1,3 +1,5 @@
+" TODO: add tmux support
+
 function! s:EchoWarning(msg) abort
   echohl WarningMsg
   echo 'vim-gitworktree: ' . a:msg
@@ -47,6 +49,11 @@ function! s:GetWorktrees() abort
 endfunction
 
 
+function! s:GetCurrentBranch() abort
+  return trim(system('git branch --show-current'), " \n")
+endfunction
+
+
 function! s:LoadSubCmd(...) abort
   if a:0 == 0
     call s:EchoWarning('No worktree provided.')
@@ -55,7 +62,7 @@ function! s:LoadSubCmd(...) abort
 
   let cwd = getcwd()
   let worktrees = s:GetWorktrees()
-  let current_branch = trim(system('git branch --show-current'), " \n")
+  let current_branch = s:GetCurrentBranch()
   let [current_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# current_branch}, worktrees)
 
   if a:1 ==# current_branch
@@ -104,7 +111,7 @@ endfunction
 
 
 function! gitworktree#Call(arg) abort
-  call system('git status')
+  call system('git rev-parse HEAD')
 
   if v:shell_error > 0
     call s:EchoWarning('Not a git repo ' . getcwd())
@@ -119,7 +126,7 @@ function! gitworktree#Call(arg) abort
   let args = s:SplitAndFilter(a:arg)
   let cmd = args[0]
   let params = args[1:-1]
-  let cmd = 's:' . substitute(cmd, '\v^(\w)(.*)', '\u\1\e\2', '')
+  let cmd = substitute(cmd, '\v^(\w)(.*)', 's:\u\1\e\2', '')
 
   if !exists('*' . cmd . 'SubCmd')
     call s:EchoWarning('Wrong command: ' . '"' . cmd[2:-1] . '".')
@@ -131,6 +138,7 @@ endfunction
 
 
 " TODO: flags and other options/commands
+" TODO: add cmd completion for branches
 function! gitworktree#complete(lead, line, pos) abort
   let args = s:SplitAndFilter(a:line)
 
@@ -153,20 +161,21 @@ function! gitworktree#complete(lead, line, pos) abort
     return filter(branches, {_, b -> b =~# '^' . a:lead && !empty(b) })
   endif
 
+  " load
+  if len(args) == 2 && 'load' =~# tolower(args[1]) && !empty(a:lead)
+    return ['load']
+  endif
+
+  if len(args) >= 2 && tolower(args[1]) ==# 'load'
+    let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
+    let current_branch = s:GetCurrentBranch()
+    return filter(branches, {_, b -> b =~# '^' . a:lead && !empty(b) && b !=# current_branch })
+  endif
+
 
   if empty(a:lead)
-    return ['add', 'remove']
+    return ['add', 'remove', 'load']
   endif
 
   return []
 endfunction
-
-
-augroup detect_gitworktree_filetype
-  autocmd!
-  autocmd Filetype gitworktree
-        \ nnoremap <silent><buffer> <cr> :call <sid>OnEnter()<cr>
-
-  autocmd Filetype gitworktree
-        \ autocmd BufUnload <buffer> call <sid>SetWindowClosed()
-augroup END
