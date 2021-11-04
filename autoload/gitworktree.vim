@@ -175,7 +175,8 @@ function! gitworktree#complete(lead, line, pos) abort
 
   if len(args) >= 2 && tolower(args[1]) ==# 'remove'
     let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
-    return filter(branches, {_, b -> b =~# '^' . a:lead && !empty(b) })
+    let current_branch = s:GetCurrentBranch()
+    return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
   endif
 
   " load
@@ -186,7 +187,6 @@ function! gitworktree#complete(lead, line, pos) abort
   if len(args) >= 2 && tolower(args[1]) ==# 'load'
     let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
     let current_branch = s:GetCurrentBranch()
-    echom branches current_branch
     return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
   endif
 
