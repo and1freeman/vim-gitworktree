@@ -4,46 +4,28 @@ function! s:EchoWarning(msg) abort
   echohl None
 endfunction
 
+function! s:Find(predicate, list) abort
+  let item = {}
+  let found = 0
 
-function! s:LoadWorktree(path) abort
-  " silent call s:UpdateWorktreesList()
+  for el in a:list
+    if call(a:predicate, [el])
+      let item = el
+      let found = 1
+      break
+    endif
+  endfor
 
-  " if empty(a:path)
-  "   return
-  " endif
+  return [item, found]
+endfunction
 
-  " let cwd = getcwd()
+function! s:isFileInsidePath(filename, path) abort
+  if !len(a:filename)
+    return 0
+  endif
 
-  " let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:isFileInsidePath(get(buf, 'name', ''), cwd)})
-  " let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> get(buf, 'changed', 0) == 1 })
-  " let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':.')})
-
-  " if len(modified_buffers)
-  "   call s:EchoWarning("Can not change worktree. Following files are not saved:")
-  "   echo join(modified_buffers_names, '\n')
-
-  "   return
-  " endif
-
-  " let current_worktree = utils#Find({wtree -> get(wtree, 'is_current', 0)}, s:worktrees, {})
-  " let new_worktree = utils#Find({wtree -> get(wtree, 'path', '') ==# a:path}, s:worktrees, {})
-
-  " if empty(new_worktree)
-  "   call s:EchoWarning('Can not find selected worktree. Try to update worktrees list.')
-  "   return
-  " endif
-
-  " if get(current_worktree, 'path', 'NO_CURRENT') ==# get(new_worktree, 'path', 'NO_NEW')
-  "   call s:EchoWarning('Already in ' . current_worktree.path . '. ' .  '[' . current_worktree.branch . ']')
-  "   return
-  " endif
-
-  " for buffer in buffers_in_current_worktree
-  "   exec ':bd ' . get(buffer, 'bufnr', -1)
-  " endfor
-
-  " let new_worktree_path = get(new_worktree, 'path')
-  " exec ':cd ' . new_worktree_path . ' | e ' . new_worktree_path
+  let modified = fnamemodify(a:filename, ':p')
+  return filereadable(modified) && len(matchstr(modified, a:path)) > 0
 endfunction
 
 
@@ -62,6 +44,50 @@ function! s:GetWorktrees() abort
   endfor
 
   return worktrees
+endfunction
+
+
+function! s:LoadSubCmd(...) abort
+  if a:0 == 0
+    call s:EchoWarning('No worktree provided.')
+    return
+  endif
+
+  let cwd = getcwd()
+  let worktrees = s:GetWorktrees()
+  let current_branch = trim(system('git branch --show-current'), " \n")
+  let [current_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# current_branch}, worktrees)
+
+  if a:1 ==# current_branch
+    call s:EchoWarning('Already in ' . current_worktree.path . ' [' . a:1 . ']')
+    return
+  endif
+
+  let [new_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# a:1}, worktrees)
+
+  if !found
+    call s:EchoWarning('Worktree not found: ' . a:1)
+    return
+  endif
+
+  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:isFileInsidePath(get(buf, 'name', ''), cwd)})
+  let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> get(buf, 'changed', 0) == 1 })
+  let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':.')})
+
+  if !empty(modified_buffers)
+    call s:EchoWarning("Can not change worktree. Following files are not saved:")
+    echo join(modified_buffers_names, '\n')
+
+    return
+  endif
+
+  for buffer in buffers_in_current_worktree
+    exec 'bd ' . get(buffer, 'bufnr', -1)
+  endfor
+
+  let new_worktree_path = get(new_worktree, 'path')
+  exec 'cd ' . new_worktree_path . ' | e ' . new_worktree_path
+  exec 'clearjumps'
 endfunction
 
 
@@ -86,7 +112,7 @@ function! gitworktree#Call(arg) abort
   endif
 
   if empty(a:arg)
-    call s:ListWorktrees()
+    echo system('git worktree list')
     return
   endif
 
