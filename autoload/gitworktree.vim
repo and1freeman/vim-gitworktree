@@ -1,5 +1,9 @@
 " TODO: add tmux support
 
+let g:gitworktree_config = {
+      \ 'use_tmux': 1,
+      \ }
+
 function! s:EchoWarning(msg) abort
   echohl WarningMsg
   echo 'vim-gitworktree: ' . a:msg
@@ -21,7 +25,7 @@ function! s:Find(predicate, list) abort
   return [item, found]
 endfunction
 
-function! s:isFileInsidePath(filename, path) abort
+function! s:IsFileInsidePath(filename, path) abort
   if !len(a:filename)
     return 0
   endif
@@ -93,9 +97,18 @@ function! s:LoadSubCmd(...) abort
     return
   endif
 
-  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:isFileInsidePath(get(buf, 'name', ''), cwd)})
+  let new_worktree_path = get(new_worktree, 'path')
+
+  if g:gitworktree_config.use_tmux
+    " TODO: switch to window if already loaded?
+    call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  new_worktree_path . ' vim .')
+    return
+  endif
+
+  let buffers_in_current_worktree = filter(getbufinfo({ 'buflisted' : 1 }), {_, buf -> s:IsFileInsidePath(get(buf, 'name', ''), cwd)})
   let modified_buffers = filter(deepcopy(buffers_in_current_worktree), {_, buf -> get(buf, 'changed', 0) == 1 })
   let modified_buffers_names = map(deepcopy(modified_buffers), {_, buf -> fnamemodify(get(buf, 'name', ''), ':.')})
+
 
   if !empty(modified_buffers)
     call s:EchoWarning("Can not change worktree. Following files are not saved:")
@@ -108,7 +121,6 @@ function! s:LoadSubCmd(...) abort
     exec 'bd ' . get(buffer, 'bufnr', -1)
   endfor
 
-  let new_worktree_path = get(new_worktree, 'path')
   exec 'cd ' . new_worktree_path
   exec 'Ntree ' . new_worktree_path
   exec 'clearjumps'
