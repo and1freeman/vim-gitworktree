@@ -101,6 +101,7 @@ function! s:LoadSubCmd(...) abort
 
   if g:gitworktree_config.use_tmux
     " TODO: switch to window if already loaded?
+    " TODO: clear jumps
     call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  new_worktree_path . ' vim .')
     return
   endif
@@ -186,9 +187,9 @@ function! gitworktree#complete(lead, line, pos) abort
   endif
 
   if len(args) >= 2 && tolower(args[1]) ==# 'remove'
-    let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
-    let current_branch = s:GetCurrentBranch()
-    return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
+    let paths = map(s:GetWorktrees(), {_, wt -> get(wt, 'path', '')})
+    let current_path = getcwd()
+    return filter(paths, {_, p -> p =~# '^' . a:lead && p !=# current_path })
   endif
 
   " load
