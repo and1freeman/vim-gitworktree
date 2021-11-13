@@ -101,6 +101,7 @@ function! s:LoadSubCmd(...) abort
 
   if g:gitworktree_config.use_tmux
     " TODO: switch to window if already loaded?
+    " TODO: clear jumps
     call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  new_worktree_path . ' vim .')
     return
   endif

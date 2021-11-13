@@ -1,0 +1,29 @@
+*gitworktree.txt* Git worktree wrapper for vim.
+
+INTRODUCTION                                     *gitworktree*
+
+This simple wrapper is created to manage git worktrees more effectively.
+Besides having git-worktree functionality, it also provides ways to use tmux
+to control worktrees in different windows.
+
+COMMANDS
+
+                                                 *:Gwt*
+:Gwt                    With no arguments, show list of workrees associated
+                        with current git repository.
+
+                                                 *:Gwt_add*
+:Gwt add {args}         Add a git worktree. {args} are just anything
+                        git-worktree can accept.
+
+                                                 *:Gwt_remove*
+:Gwt remove {worktree}  Remove {worktree}. {worktree} may be a branch name, as
+                        as well as a path (for worktrees with detached HEAD).
+
+                                                 *:Gwt_load*
+:Gwt load {worktree}    Load {worktree}. {worktree} is a branch name or path
+                        (see |:Gwt_remove|). At the moment, it is possible to
+                        load worktree inside current vim process or inside new
+                        tmux window.
+
+vim:tw=78:et:ft=help:
