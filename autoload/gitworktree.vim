@@ -1,5 +1,3 @@
-" TODO: add tmux support
-
 let g:gitworktree_config = {
       \ 'use_tmux': 1,
       \ }
@@ -40,9 +38,16 @@ function! s:SplitAndFilter(string) abort
 endfunction
 
 
+function! s:IsGitWorktree() abort
+  call system('git rev-parse HEAD')
+  return v:shell_error == 0
+endfunction
+
+
 function! s:IsBareRepo() abort
   return trim(system('git rev-parse --is-bare-repository'), " \n") ==# 'true'
 endfunction
+
 
 function! s:GetWorktrees() abort
   let worktrees = []
@@ -50,14 +55,16 @@ function! s:GetWorktrees() abort
   for worktree in systemlist('git worktree list')
     let list = s:SplitAndFilter(worktree)
 
-    if trim(list[1],'()') ==# 'bare'
+    if matchstr(worktree, '\s(\zsbare\ze)') ==# 'bare'
       continue
     endif
 
-    let path = list[0]
-    let branch = trim(list[2], '[]')
+    let path = matchstr(worktree, '^\f*')
+    let sha = matchstr(worktree, '\s\+\zs\x*\ze\s\+')
+    let branch = matchstr(worktree, '\[\zs.*\ze\]')
+    let is_detached = empty(branch)
 
-    call extend(worktrees, [{ 'branch': branch, 'path': path }])
+    call extend(worktrees, [{ 'branch': branch, 'path': path, 'sha': sha, 'is_detached': is_detached }])
   endfor
 
   return worktrees
@@ -79,30 +86,36 @@ function! s:LoadSubCmd(...) abort
     return
   endif
 
-  let branch = a:1
-
   let cwd = getcwd()
   let worktrees = s:GetWorktrees()
-  let [current_worktree, found] = s:Find({wt -> get(wt, 'path', '') ==# cwd}, worktrees)
 
-  if found && branch ==# current_worktree.branch
-    call s:EchoWarning('Already in ' . current_worktree.path . ' [' . branch . ']')
-    return
-  endif
-
-  let [new_worktree, found] = s:Find({wt -> get(wt, 'branch', '') ==# branch}, worktrees)
+  " new worktree
+  let [nwt, found] = s:Find({wt -> wt.branch ==# a:1 || wt.path ==# a:1}, worktrees)
 
   if !found
     call s:EchoWarning('Worktree not found: ' . a:1)
     return
   endif
 
-  let new_worktree_path = get(new_worktree, 'path')
+  " current worktree
+  let [cwt, found] = s:Find({wt -> wt.path ==# cwd}, worktrees)
+
+  let cwt_path = cwt.path
+  let cwt_branch = cwt.branch
+  let cwt_sha = cwt.sha
+
+  if (a:1 ==# cwt_branch || a:1 ==# cwt_path)
+    let msg = 'Already in '  . cwt_path  .  (empty(cwt_branch)  ? '    ' .  cwt_sha . '  (detached HEAD)' : '    [' . cwt_branch . ']')
+
+    call s:EchoWarning(msg)
+    return
+  endif
+
+  let nwt_path = nwt.path
 
   if g:gitworktree_config.use_tmux
     " TODO: switch to window if already loaded?
-    " TODO: clear jumps
-    call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  new_worktree_path . ' vim .')
+    call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  nwt_path . ' vim -c "clearjumps" .')
     return
   endif
 
@@ -122,8 +135,8 @@ function! s:LoadSubCmd(...) abort
     exec 'bd ' . get(buffer, 'bufnr', -1)
   endfor
 
-  exec 'cd ' . new_worktree_path
-  exec 'Ntree ' . new_worktree_path
+  exec 'cd ' . nwt_path
+  exec 'Ntree ' . nwt_path
   exec 'clearjumps'
 endfunction
 
@@ -141,10 +154,10 @@ endfunction
 
 
 function! gitworktree#Call(arg) abort
-  call system('git rev-parse HEAD')
+  let is_git_worktree = s:IsGitWorktree()
 
-  if v:shell_error > 0
-    call s:EchoWarning('Not a git repo ' . getcwd())
+  if !is_git_worktree
+    call s:EchoWarning('Not a git repo or worktree ' . getcwd())
     return
   endif
 
@@ -187,9 +200,8 @@ function! gitworktree#complete(lead, line, pos) abort
   endif
 
   if len(args) >= 2 && tolower(args[1]) ==# 'remove'
-    let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
-    let current_branch = s:GetCurrentBranch()
-    return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
+    let variants = map(s:GetWorktrees(), {_, wt -> wt.is_detached ? wt.path : wt.branch})
+    return filter(variants, {_, r -> r =~# '^' . a:lead})
   endif
 
   " load
@@ -198,9 +210,8 @@ function! gitworktree#complete(lead, line, pos) abort
   endif
 
   if len(args) >= 2 && tolower(args[1]) ==# 'load'
-    let branches = map(s:GetWorktrees(), {_, wt -> get(wt, 'branch', '')})
-    let current_branch = s:GetCurrentBranch()
-    return filter(branches, {_, b -> b =~# '^' . a:lead && b !=# current_branch })
+    let variants = map(s:GetWorktrees(), {_, wt -> wt.is_detached ? wt.path : wt.branch})
+    return filter(variants, {_, r -> r =~# '^' . a:lead})
   endif
 
 
