@@ -114,10 +114,11 @@ function! s:LoadSubCmd(...) abort
   endif
 
   let nwt_path = nwt.path
+  let window_name = empty(nwt.branch) ? nwt.sha : nwt.branch
 
   if g:gitworktree_config.use_tmux
     " TODO: switch to window if already loaded?
-    call system('tmux new-window -P -F "#{pane_id} #{window_id}" -c ' .  nwt_path . ' vim -c "clearjumps" .')
+    call system('tmux new-window -P -F "#{pane_id} #{window_id}" -n ' .  window_name . ' -c ' .  nwt_path . ' vim -c "clearjumps" .')
     return
   endif
 
