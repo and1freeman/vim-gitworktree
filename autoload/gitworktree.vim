@@ -100,15 +100,17 @@ function! s:LoadSubCmd(...) abort
   " current worktree
   let [cwt, found] = s:Find({wt -> wt.path ==# cwd}, worktrees)
 
-  let cwt_path = cwt.path
-  let cwt_branch = cwt.branch
-  let cwt_sha = cwt.sha
+  if found
+    let cwt_path = cwt.path
+    let cwt_branch = cwt.branch
+    let cwt_sha = cwt.sha
 
-  if (a:1 ==# cwt_branch || a:1 ==# cwt_path)
-    let msg = 'Already in '  . cwt_path  .  (empty(cwt_branch)  ? '    ' .  cwt_sha . '  (detached HEAD)' : '    [' . cwt_branch . ']')
+    if (a:1 ==# cwt_branch || a:1 ==# cwt_path)
+      let msg = 'Already in '  . cwt_path  .  (empty(cwt_branch)  ? '    ' .  cwt_sha . '  (detached HEAD)' : '    [' . cwt_branch . ']')
 
-    call s:EchoWarning(msg)
-    return
+      call s:EchoWarning(msg)
+      return
+    endif
   endif
 
   let nwt_path = nwt.path
@@ -147,6 +149,7 @@ function! s:AddSubCmd(...) abort
 endfunction
 
 
+"TODO: don't remove wt if is current
 function! s:RemoveSubCmd(...) abort
   let cmd = 'git worktree remove ' . join(a:000)
   echo system(cmd)
