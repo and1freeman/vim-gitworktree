@@ -150,10 +150,26 @@ function! s:AddSubCmd(...) abort
 endfunction
 
 
-"TODO: don't remove wt if is current
+" TODO: add --force flag support
 function! s:RemoveSubCmd(...) abort
-  let cmd = 'git worktree remove ' . join(a:000)
-  echo system(cmd)
+  let cmd = 'git worktree remove '
+
+  let arg = a:000[0]
+  let worktrees = s:GetWorktrees()
+
+  let [rwt, found] = s:Find({wt -> wt.branch ==# arg || wt.branch ==# wt.path }, worktrees)
+
+  if !found
+    call s:EchoWarning('Worktree not found.')
+    return
+  endif
+
+  if rwt.path ==# getcwd()
+    call s:EchoWarning('Can not remove current worktree.')
+    return
+  endif
+
+  echo system(cmd . rwt.path)
 endfunction
 
 
