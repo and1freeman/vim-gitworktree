@@ -1,3 +1,8 @@
+" TODO: load on worktree add. flag?
+" TODO: add cmd autocomplete
+" TODO: refactor autocomplete
+" TODO: add worktree from head of specified branch
+" TODO: make load command create worktree, if it doesn't exist
 let g:gitworktree_config = {
       \ 'use_tmux': 1,
       \ }
@@ -80,9 +85,9 @@ function! s:GetCurrentBranch() abort
 endfunction
 
 
-function! s:LoadSubCmd(...) abort
+function! s:Load(...) abort
   if a:0 == 0
-    call s:EchoWarning('No worktree provided.')
+    call s:EchoWarning('No worktree provided')
     return
   endif
 
@@ -144,14 +149,14 @@ function! s:LoadSubCmd(...) abort
 endfunction
 
 
-function! s:AddSubCmd(...) abort
+function! s:Add(...) abort
   let cmd = 'git worktree add ' . join(a:000)
   echo system(cmd)
 endfunction
 
 
 " TODO: add --force flag support
-function! s:RemoveSubCmd(...) abort
+function! s:Remove(...) abort
   let cmd = 'git worktree remove '
 
   let arg = a:000[0]
@@ -160,12 +165,12 @@ function! s:RemoveSubCmd(...) abort
   let [rwt, found] = s:Find({wt -> wt.branch ==# arg || wt.branch ==# wt.path }, worktrees)
 
   if !found
-    call s:EchoWarning('Worktree not found.')
+    call s:EchoWarning('Worktree not found')
     return
   endif
 
   if rwt.path ==# getcwd()
-    call s:EchoWarning('Can not remove current worktree.')
+    call s:EchoWarning('Can not remove current worktree')
     return
   endif
 
@@ -173,7 +178,43 @@ function! s:RemoveSubCmd(...) abort
 endfunction
 
 
-function! gitworktree#Call(arg) abort
+function! s:List() abort
+  echo system('git worktree list')
+endfunction
+
+
+function! s:RemoveComplete(lead, ...) abort
+  if a:0 == 0 && empty(a:lead) || a:0 == 1 && !empty(a:lead)
+    let arg = empty(a:000) ? '' : a:1
+    let variants = map(s:GetWorktrees(), {_, wt -> wt.is_detached ? wt.path : wt.branch})
+    return filter(variants, {_, r -> r =~# '^' . arg})
+  endif
+
+  return []
+endfunction
+
+
+function! s:LoadComplete(lead, ...) abort
+  return call('s:RemoveComplete', extend([a:lead], a:000))
+endfunction
+
+
+let s:Commands = {
+      \ 'add': function('s:Add'),
+      \ 'list': function('s:List'),
+      \ 'remove': function('s:Remove'),
+      \ 'load': function('s:Load'),
+      \ }
+
+
+let s:CompletionFunctions = {
+      \ 'add': {-> []},
+      \ 'remove': function('s:RemoveComplete'),
+      \ 'load': function('s:LoadComplete'),
+      \ }
+
+
+function! gitworktree#call(arg) abort
   let is_git_worktree = s:IsGitWorktree()
 
   if !is_git_worktree
@@ -181,63 +222,27 @@ function! gitworktree#Call(arg) abort
     return
   endif
 
-  if empty(a:arg)
-    echo system('git worktree list')
-    return
-  endif
-
-  let args = s:SplitAndFilter(a:arg)
+  let args = s:SplitAndFilter(empty(a:arg) ? 'list' : a:arg)
   let cmd = args[0]
   let params = args[1:-1]
-  let cmd = substitute(cmd, '\v^(\w)(.*)', 's:\u\1\e\2', '')
 
-  if !exists('*' . cmd . 'SubCmd')
-    call s:EchoWarning('Wrong command: ' . '"' . cmd[2:-1] . '".')
-    return
-  endif
+  let Cmd = get(s:Commands, cmd, {... -> call('s:EchoWarning', ['Unknown command: ' . '"' . cmd . '"'])})
 
-  call call(function(cmd . 'SubCmd'), params)
+  call call(Cmd, params)
 endfunction
 
 
-" TODO: flags and other options/commands
-" TODO: add cmd completion for branches
 function! gitworktree#complete(lead, line, pos) abort
   let args = s:SplitAndFilter(a:line)
+  let cmds = keys(s:Commands)
 
-  " add
-  if len(args) == 2 && 'add' =~# tolower(args[1]) && !empty(a:lead)
-    return ['add']
+  if len(args) == 1
+    return cmds
+  elseif len(args) == 2 && !empty(a:lead)
+    return filter(cmds, {_, cmd -> cmd =~# '^' . args[1] })
   endif
 
-  if len(args) >= 2 && tolower(args[1]) ==# 'add'
-    return []
-  endif
+  let CompletionFunction = get(s:CompletionFunctions, args[1], {-> []})
 
-  " remove
-  if len(args) == 2 && 'remove' =~# tolower(args[1]) && !empty(a:lead)
-    return ['remove']
-  endif
-
-  if len(args) >= 2 && tolower(args[1]) ==# 'remove'
-    let variants = map(s:GetWorktrees(), {_, wt -> wt.is_detached ? wt.path : wt.branch})
-    return filter(variants, {_, r -> r =~# '^' . a:lead})
-  endif
-
-  " load
-  if len(args) == 2 && 'load' =~# tolower(args[1]) && !empty(a:lead)
-    return ['load']
-  endif
-
-  if len(args) >= 2 && tolower(args[1]) ==# 'load'
-    let variants = map(s:GetWorktrees(), {_, wt -> wt.is_detached ? wt.path : wt.branch})
-    return filter(variants, {_, r -> r =~# '^' . a:lead})
-  endif
-
-
-  if empty(a:lead)
-    return ['add', 'remove', 'load']
-  endif
-
-  return []
+  return call(CompletionFunction, extend([a:lead], args[2:-1]))
 endfunction

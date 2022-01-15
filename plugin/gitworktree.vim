@@ -5,6 +5,4 @@ endif
 let g:loaded_gitworktree = 1
 
 command! -nargs=* -complete=customlist,gitworktree#complete Gwt
-      \ call gitworktree#Call(<q-args>)
-
-nnoremap <leader>gw :Gwt<cr>
+      \ call gitworktree#call(<q-args>)
