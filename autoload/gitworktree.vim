@@ -54,6 +54,9 @@ function! s:IsBareRepo() abort
 endfunction
 
 
+let s:DoesBranchExist = {branch -> !!system('git show-ref ' . branch)}
+
+
 function! s:GetWorktrees() abort
   let worktrees = []
 
@@ -87,8 +90,7 @@ endfunction
 
 function! s:Load(...) abort
   if a:0 == 0
-    call s:EchoWarning('No worktree provided')
-    return
+    return s:EchoWarning('No worktree provided')
   endif
 
   let cwd = getcwd()
@@ -98,8 +100,7 @@ function! s:Load(...) abort
   let [nwt, found] = s:Find({wt -> wt.branch ==# a:1 || wt.path ==# a:1}, worktrees)
 
   if !found
-    call s:EchoWarning('Worktree not found: ' . a:1)
-    return
+    return s:EchoWarning('Worktree not found: ' . a:1)
   endif
 
   " current worktree
@@ -113,15 +114,14 @@ function! s:Load(...) abort
     if (a:1 ==# cwt_branch || a:1 ==# cwt_path)
       let msg = 'Already in '  . cwt_path  .  (empty(cwt_branch)  ? '    ' .  cwt_sha . '  (detached HEAD)' : '    [' . cwt_branch . ']')
 
-      call s:EchoWarning(msg)
-      return
+      return s:EchoWarning(msg)
     endif
   endif
 
   let nwt_path = nwt.path
   let window_name = empty(nwt.branch) ? nwt.sha : nwt.branch
 
-  if g:gitworktree_config.use_tmux
+  if g:gitworktree_config.use_tmux && executable('tmux')
     " TODO: switch to window if already loaded?
     call system('tmux new-window -P -F "#{pane_id} #{window_id}" -n ' .  window_name . ' -c ' .  nwt_path . ' vim -c "clearjumps" .')
     return
@@ -150,8 +150,14 @@ endfunction
 
 
 function! s:Add(...) abort
-  let cmd = 'git worktree add ' . join(a:000)
-  echo system(cmd)
+  let cmd = 'git worktree add'
+
+  if a:0 == 1
+    let dir = '../' . substitute(a:1, '[\\/]', '-', 'g')
+    let flag = s:DoesBranchExist(a:1) ? '' : '-b'
+    let cmd = join([cmd, dir, flag, a:1], ' ')
+    echo system(cmd)
+  endif
 endfunction
 
 
@@ -162,16 +168,14 @@ function! s:Remove(...) abort
   let arg = a:000[0]
   let worktrees = s:GetWorktrees()
 
-  let [rwt, found] = s:Find({wt -> wt.branch ==# arg || wt.branch ==# wt.path }, worktrees)
+  let [rwt, found] = s:Find({wt -> wt.branch ==# arg || wt.path ==# arg }, worktrees)
 
   if !found
-    call s:EchoWarning('Worktree not found')
-    return
+    return s:EchoWarning('Worktree not found')
   endif
 
   if rwt.path ==# getcwd()
-    call s:EchoWarning('Can not remove current worktree')
-    return
+    return s:EchoWarning('Can not remove current worktree')
   endif
 
   echo system(cmd . rwt.path)
@@ -180,6 +184,13 @@ endfunction
 
 function! s:List() abort
   echo system('git worktree list')
+endfunction
+
+
+function! s:AddComplete(lead, ...) abort
+  let branches = map(systemlist('git branch -a'), {_, branch -> trim(branch, '*+ ')})
+
+  return branches
 endfunction
 
 
@@ -208,7 +219,7 @@ let s:Commands = {
 
 
 let s:CompletionFunctions = {
-      \ 'add': {-> []},
+      \ 'add': function('s:AddComplete'),
       \ 'remove': function('s:RemoveComplete'),
       \ 'load': function('s:LoadComplete'),
       \ }
@@ -218,15 +229,14 @@ function! gitworktree#call(arg) abort
   let is_git_worktree = s:IsGitWorktree()
 
   if !is_git_worktree
-    call s:EchoWarning('Not a git repo or worktree ' . getcwd())
-    return
+    return s:EchoWarning('Not a git repo or worktree ' . getcwd())
   endif
 
   let args = s:SplitAndFilter(empty(a:arg) ? 'list' : a:arg)
   let cmd = args[0]
   let params = args[1:-1]
 
-  let Cmd = get(s:Commands, cmd, {... -> call('s:EchoWarning', ['Unknown command: ' . '"' . cmd . '"'])})
+  let Cmd = get(s:Commands, cmd, {-> call('s:EchoWarning', ['Unknown command: ' . '"' . cmd . '"'])})
 
   call call(Cmd, params)
 endfunction
